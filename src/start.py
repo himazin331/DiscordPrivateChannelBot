@@ -11,7 +11,7 @@ def main():
   intents.message_content = True
 
   prefix: str = "$"
-  bot: commands.Bot = commands.Bot(command_prefix=prefix, intents=intents)
+  bot: commands.Bot = commands.Bot(command_prefix=prefix, intents=intents, activity=discord.Game("running...") )
 
   async def setup_bot():
     await bot.load_extension("Cogs.private_channel")

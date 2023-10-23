@@ -1,12 +1,14 @@
 import discord
-from discord import CategoryChannel, Guild, TextChannel
+from discord import Guild, CategoryChannel, TextChannel, Embed
 from discord.ext import commands
 import asyncio
 
 from loguru import logger
 from typing import Optional
 
-from settings import GUILD_NAME, GUILD_ID, CHANNEL_ID, CATEGORY_ID
+from utils.embed_template import success_embed_template, error_embed_template, info_embed_template
+
+from settings import GUILD_NAME, GUILD_ID, CATEGORY_ID
 
 
 class PrivateChannel(commands.Cog):
@@ -16,6 +18,7 @@ class PrivateChannel(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info("Login successful.")
+        self.guild: Guild = self.bot.get_guild(GUILD_ID)
         self.used_pvch_userid: dict[int, TextChannel] = {}
 
     @commands.command(description="Display help")
@@ -29,10 +32,15 @@ class PrivateChannel(commands.Cog):
         await ctx.message.delete()
 
         user_id: int = ctx.author.id
-        if self.used_pvch_userid.get(user_id) is not None:
-            logger.debug("Skipped because a private channel already exists.")
-            await ctx.send(f"あなたのプライベートチャンネル{self.used_pvch_userid[user_id].mention}は既に存在します。", delete_after=5.0)
-            return
+        if (ch := self.used_pvch_userid.get(user_id)) is not None:
+            if self.guild.get_channel(ch.id) is not None:
+                logger.debug("Skipped because a private channel already exists.")
+                msg: str = f"あなたのプライベートチャンネル{self.used_pvch_userid[user_id].mention}は既に存在します。\n\nヒント: `$pvch_delete`でプライベートチャンネルを削除することができます。"
+                embed: Embed = error_embed_template(msg)
+                await ctx.send(embed=embed, delete_after=5.0)
+                return
+            else:
+                del self.used_pvch_userid[user_id]
 
         ch_name: str = f"pvch-{ctx.author.global_name}"
         permission: dict = {
@@ -46,23 +54,25 @@ class PrivateChannel(commands.Cog):
         if channel is not None:
             logger.debug("Successfully created a private channel.")
 
-            await ctx.send(f"{channel.mention} を作成しました。", delete_after=5.0)
+            embed = success_embed_template(f"{channel.mention}を作成しました。")
+            await ctx.send(embed=embed, delete_after=5.0)
             self.used_pvch_userid[user_id] = channel
 
             await self.init_private_channel(channel)
         else:
             logger.error("Failed to create private channel.")
-            await ctx.send("プライベートチャンネルの作成に失敗しました。", delete_after=5.0)
+            embed = error_embed_template("プライベートチャンネルの作成に失敗しました。")
+            await ctx.send(embed=embed, delete_after=5.0)
 
     async def init_private_channel(self, channel: TextChannel):
         logger.debug("Sending the initial message after creating a private channel.")
-        text: str = f"""
-ようこそ！ここはプライベートチャンネルです！
-このチャンネルはあなたとあなたが招待した方のみ閲覧できます。(ただし、権限者は例外です)\n
+        msg: str = """
+このチャンネルはあなたとあなたが招待した方のみ閲覧できます。(ただし、権限者は閲覧可)\n
 チャンネルは作成から24時間経過すると自動的に削除されます。`$pvch_delete`で手動で削除することもできます。\n
-注意: プライベートチャンネルにおいても{GUILD_NAME} Discordサーバー利用におけるガイドラインは適用されます。
 """
-        await channel.send(text)
+        embed: Embed = Embed(title="ようこそ！ここはプライベートチャンネルです！", description=msg, color=0x3498db)
+        embed.add_field(name="注意", value=f"プライベートチャンネルにおいても{GUILD_NAME} Discordサーバー利用におけるガイドラインは適用されます。")
+        await channel.send(embed=embed)
 
     @commands.command(description="Delete private channel")
     async def pvch_delete(self, ctx: commands.Context):
@@ -72,27 +82,33 @@ class PrivateChannel(commands.Cog):
         channel: Optional[TextChannel] = self.used_pvch_userid.pop(ctx.author.id, None)
         if channel is None:
             logger.debug("Skip if private channel does not exist.")
-            await ctx.send("あなたはまだプライベートチャンネルを作成していないようです。\n`$pvch_create`で作成することができます。", delete_after=5.0)
+            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `$pvch_create`で作成することができます。"
+            embed: Embed = error_embed_template(msg)
+            await ctx.send(embed=embed, delete_after=5.0)
             return
 
         try:
             if ctx.channel.id == channel.id:
-                await ctx.send("このプライベートチャンネルを削除します！")
+                embed = info_embed_template(f"このプライベートチャンネルを削除します！")
+                await ctx.send(embed=embed)
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(5.0)
                 await channel.delete()
             else:
                 await channel.delete()
-                await ctx.send("あなたのプライベートチャンネルを削除しました。", delete_after=5.0)
+                embed = success_embed_template(f"あなたのプライベートチャンネルを削除しました。")
+                await ctx.send(embed=embed, delete_after=5.0)
         except discord.HTTPException:
             logger.error("Failed to delete private channel.")
-            await ctx.send("プライベートチャンネルの削除に失敗しました。", delete_after=5.0)
+            embed = error_embed_template("プライベートチャンネルの削除に失敗しました。")
+            await ctx.send(embed=embed, delete_after=5.0)
 
 # TODO : コマンド候補リスト表示..
 # TODO : $pvch_create @user_name[...]で作成時に指定したユーザーを招待する
 # TODO : $pvch_invite @user_name[...]で招待する
 # TODO : 自動で24時間後に削除する
 # TODO : ボットメッセージの可視性を高める
+# TODO : クールダウンの設定
 
 def setup(bot: commands.Bot):
     return bot.add_cog(PrivateChannel(bot))
