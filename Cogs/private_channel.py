@@ -72,7 +72,7 @@ class PrivateChannel(commands.Cog):
 
         invite_embed: Optional[Embed] = None
         if len(ctx.message.mentions) > 0:  # Invite invited users, if any
-            invite_embed = await self.invite(channel, ctx.message.mentions)
+            invite_embed = await self.invite(channel, user_id, ctx.message.mentions)
 
         await ctx.message.delete(delay=MSG_DELETE_DELAY)
         await ctx.message.reply(embed=success_embed_template(f"{channel.mention}を作成しました。"), delete_after=MSG_DELETE_DELAY)
@@ -148,37 +148,39 @@ class PrivateChannel(commands.Cog):
             await ctx.message.reply(embed=error_embed_template("招待するユーザーを指定してください。"), delete_after=MSG_DELETE_DELAY)
             return
 
-        embed: Embed = await self.invite(channel, mentions_members)
+        embed: Embed = await self.invite(channel, user_id, mentions_members)
 
         try:
             await channel.send(embed=embed)
+            await ctx.message.reply(embed=info_embed_template("プライベートチャンネルをご確認ください。"), delete_after=MSG_DELETE_DELAY)
         except discord.HTTPException:
             logger.error("Failed to send message to private channel.")
         await ctx.message.delete(delay=MSG_DELETE_DELAY)
-        await ctx.message.reply(embed=info_embed_template("プライベートチャンネルをご確認ください。"), delete_after=MSG_DELETE_DELAY)
 
-    async def invite(self, channel: TextChannel, mentions_members: list[discord.Member]) -> Embed:
+    async def invite(self, channel: TextChannel, user_id: int, mentions_members: list[discord.Member]) -> Embed:
         """Invitation link issued and sent"""
+        success_members: list[str] = []
         failed_members: list[str] = []
+        ignore_members: list[str] = []
 
         for member in mentions_members:
-            if member.bot:
+            if member.bot or member.id == user_id or member.roles[-1].id == MODERATOR_ROLE_ID:
+                ignore_members.append(member.name)
                 continue
-            if member.roles[-1].id == MODERATOR_ROLE_ID:
-                continue
-            # TODO 自分自身のメンションもスルーするようにする
 
             try:
                 await channel.set_permissions(member, read_messages=True, send_messages=True)
+                success_members.append(member.name)
             except discord.HTTPException:
-                failed_members.append(member.global_name)
+                failed_members.append(member.name)
 
         embed: Embed = Embed(title="プライベートチャンネル招待", color=0x9b59b6)
-        success_members: list[str] = [member.global_name for member in mentions_members if member.global_name not in failed_members]
         if len(success_members) > 0:
             embed.add_field(name="成功", value="- "+"\n- ".join(success_members), inline=False)
         if len(failed_members) > 0:
             embed.add_field(name="失敗", value="- "+"\n- ".join(failed_members), inline=False)
+        if len(ignore_members) > 0:
+            embed.add_field(name="無効", value="- "+"\n- ".join(ignore_members), inline=False)
         return embed
 
     @commands.command(description="Leave private channel")
