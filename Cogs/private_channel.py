@@ -158,7 +158,7 @@ class PrivateChannel(commands.Cog):
         await ctx.message.delete(delay=MSG_DELETE_DELAY)
 
     async def invite(self, channel: TextChannel, user_id: int, mentions_members: list[discord.Member]) -> Embed:
-        """Invitation link issued and sent"""
+        """User Invitation"""
         success_members: list[str] = []
         failed_members: list[str] = []
         ignore_members: list[str] = []
@@ -208,13 +208,12 @@ class PrivateChannel(commands.Cog):
     async def pvch_kick(self, ctx: commands.Context):
         """Kick private channel"""
         channel: Optional[TextChannel] = self.used_pvch_userid.get(ctx.author.id)
-        if channel is None:
-            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `$pvch_create`で作成することができます。"
+
+        if ctx.channel.category_id != CATEGORY_ID:
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
+            await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), delete_after=MSG_DELETE_DELAY)
             return
-        
-        if ctx.channel.category_id == CATEGORY_ID and ctx.channel.id != channel.id:  # In someone else's private channel
+        if channel is None or ctx.channel.id != channel.id:  # In someone else's private channel
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
             await ctx.message.reply(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
             return
@@ -225,16 +224,40 @@ class PrivateChannel(commands.Cog):
             await ctx.message.reply(embed=error_embed_template("追放するユーザーを指定してください。"), delete_after=MSG_DELETE_DELAY)
             return
 
+        embed: Embed = await self.kick(channel, ctx.author.id, mentions_members)
+
         try:
-            # TODO 追放処理
-            await ctx.channel.set_permissions(ctx.author, overwrite=None)
-            await ctx.message.reply(embed=info_embed_template(f"{ctx.author.global_name}さんをプライベートチャンネルから追放しました。"))
+            await channel.send(embed=embed)
         except discord.HTTPException:
             logger.error("Failed to leave private channel.")
-            await ctx.message.reply(embed=error_embed_template("プライベートチャンネルからの追放に失敗しました。"))
-            return
 
-# TODO : プライベートチャンネルを抜けさせるコマンド
+    async def kick(self, channel: TextChannel, user_id: int, mentions_members: list[discord.Member]) -> Embed:
+        """User Kick"""
+        success_members: list[str] = []
+        failed_members: list[str] = []
+        ignore_members: list[str] = []
+
+        for member in mentions_members:
+            if member.bot or member.id == user_id or member.roles[-1].id == MODERATOR_ROLE_ID:
+                ignore_members.append(member.name)
+                continue
+
+            try:
+                await channel.set_permissions(member, overwrite=None)
+                success_members.append(member.name)
+            except discord.HTTPException:
+                failed_members.append(member.name)
+
+        embed: Embed = Embed(title="プライベートチャンネル追放", color=0xf1c40f)
+        if len(success_members) > 0:
+            embed.add_field(name="成功", value="- "+"\n- ".join(success_members), inline=False)
+        if len(failed_members) > 0:
+            embed.add_field(name="失敗", value="- "+"\n- ".join(failed_members), inline=False)
+        if len(ignore_members) > 0:
+            embed.add_field(name="無効", value="- "+"\n- ".join(ignore_members), inline=False)
+        return embed
+
+
 # TODO : 自動削除の実装 
     # 作成から24時間後に削除
     # 削除15分前に通知
@@ -245,6 +268,7 @@ class PrivateChannel(commands.Cog):
 # TODO : admin専用コマンドの作成
     # 他人のプライベートチャンネル削除
 # TODO : クールダウンの設定
+# TODO : テンプレート機能の実装
 
 def setup(bot: commands.Bot):
     return bot.add_cog(PrivateChannel(bot))
