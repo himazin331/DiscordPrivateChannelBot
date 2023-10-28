@@ -1,5 +1,6 @@
+from math import e
 import discord
-from discord import Guild, CategoryChannel, TextChannel, Embed
+from discord import app_commands, Guild, CategoryChannel, TextChannel, Embed
 from discord.ext import commands
 import asyncio
 
@@ -35,6 +36,8 @@ class PrivateChannelBot(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info("Login successful.")
+        await self.bot.tree.sync(guild=discord.Object(GUILD_ID))
+
         self.guild: Guild = self.bot.get_guild(GUILD_ID)
         self.category: CategoryChannel = self.guild.get_channel(CATEGORY_ID)
 
@@ -42,50 +45,46 @@ class PrivateChannelBot(commands.Cog):
         for ch in self.category.text_channels:
             await ch.delete()
 
-        self.ch_permission: dict = {
-            self.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            self.guild.get_role(MODERATOR_ROLE_ID): discord.PermissionOverwrite(read_messages=True),
-            self.guild.me: discord.PermissionOverwrite(read_messages=True)
-        }
-
         self.used_pvch_userid: dict[int, PrivateChannel] = {}
 
-    @commands.command(description="Create private channel [For public channel use only]")
-    async def pvch_create(self, ctx: commands.Context):
+    @app_commands.command(name="pvch_create", description="自分のプライベートチャンネルを作成する")
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_create(self, ctx: discord.Interaction, invite_user: discord.Member = None):
         """Create private channel"""
         if ctx.channel.category_id == CATEGORY_ID:
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("このコマンドはプライベートチャンネル内では実行できません。"), ephemeral=True)
             return
 
-        user_id: int = ctx.author.id
+        user_id: int = ctx.user.id
         # Check if private channels already exists.
         if (pvch := self.used_pvch_userid.get(user_id)) is not None:
             if self.guild.get_channel(pvch.channel.id) is not None:
-                msg: str = f"あなたのプライベートチャンネル{pvch.channel.mention}は既に存在します。\n\nヒント: `$pvch_delete`でプライベートチャンネルを削除することができます。"
-                await ctx.message.delete(delay=MSG_DELETE_DELAY)
-                await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
+                msg: str = f"あなたのプライベートチャンネル{pvch.channel.mention}は既に存在します。\n\nヒント: `/pvch_delete`でプライベートチャンネルを削除することができます。"
+                await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
                 return
             else:
                 del self.used_pvch_userid[user_id]
 
         # Create private channel
-        ch_name: str = f"pvch-{ctx.author.global_name}"
-        self.ch_permission[ctx.author] = discord.PermissionOverwrite(read_messages=True)
+        ch_name: str = f"pvch-{ctx.user.global_name}"
+        ch_permission: dict = {
+            self.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            self.guild.get_role(MODERATOR_ROLE_ID): discord.PermissionOverwrite(read_messages=True),
+            self.guild.me: discord.PermissionOverwrite(read_messages=True),
+            ctx.user: discord.PermissionOverwrite(read_messages=True)
+        }
         try:
-            channel: TextChannel = await self.category.create_text_channel(name=ch_name, overwrites=self.ch_permission)
+            channel: TextChannel = await self.category.create_text_channel(name=ch_name, overwrites=ch_permission)
         except discord.HTTPException:
             logger.error("Failed to create private channel.")
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("プライベートチャンネルの作成に失敗しました。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("プライベートチャンネルの作成に失敗しました。"), ephemeral=True)
             return
 
         invite_embed: Optional[Embed] = None
-        if len(ctx.message.mentions) > 0:  # Invite invited users, if any
-            invite_embed = await self.invite(channel, user_id, ctx.message.mentions)
+        if invite_user is not None:  # Invite invited users, if any
+            invite_embed = await self.invite(channel, user_id, invite_user)
 
-        await ctx.message.delete(delay=MSG_DELETE_DELAY)
-        await ctx.message.reply(embed=success_embed_template(f"{channel.mention}を作成しました。"), delete_after=MSG_DELETE_DELAY)
+        await ctx.response.send_message(embed=success_embed_template(f"{channel.mention}を作成しました。"), ephemeral=True)
         self.used_pvch_userid[user_id] = PrivateChannel(user_id, channel)
 
         await self.init_private_channel(channel)
@@ -96,7 +95,7 @@ class PrivateChannelBot(commands.Cog):
         """Send a Welcome message to the private channel you created"""
         msg: str = """
 このチャンネルはあなたとあなたが招待した方のみ閲覧できます。(ただし、権限者は閲覧可)\n
-チャンネルは作成から24時間経過すると自動的に削除されます。`$pvch_delete`で手動で削除することもできます。\n
+チャンネルは作成から24時間経過すると自動的に削除されます。`/pvch_delete`で手動で削除することもできます。\n
 """
         channel_exp: str = (channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(hours=24)).strftime("%Y/%m/%d %H:%M:%S")
         embed: Embed = Embed(title="ようこそ！ここはプライベートチャンネルです！", description=msg, color=0x3498db)
@@ -107,165 +106,126 @@ class PrivateChannelBot(commands.Cog):
         except discord.HTTPException:
             logger.error("Failed to send message to private channel.")
 
-    @commands.command(description="Delete private channel")
-    async def pvch_delete(self, ctx: commands.Context):
+    @app_commands.command(name="pvch_delete", description="自分のプライベートチャンネルを削除する")
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_delete(self, ctx: discord.Interaction):
         """Delete private channel"""
-        pvch: Optional[PrivateChannel] = self.used_pvch_userid.pop(ctx.author.id, None)
+        pvch: Optional[PrivateChannel] = self.used_pvch_userid.pop(ctx.user.id, None)
         if pvch is None:
-            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `$pvch_create`で作成することができます。"
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
+            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `/pvch_create`で作成することができます。"
+            await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
     
         channel: TextChannel = pvch.channel
         if ctx.channel.category_id == CATEGORY_ID and ctx.channel.id != channel.id:  # In someone else's private channel
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), ephemeral=True)
             return
 
         try:
             if ctx.channel.id == channel.id:  # In my private channel
-                await ctx.message.reply(embed=info_embed_template(f"約5秒後に、このプライベートチャンネルを削除します！"))
+                await ctx.response.send_message(embed=info_embed_template(f"約5秒後に、このプライベートチャンネルを削除します。"))
 
                 await asyncio.sleep(5.0)
                 await channel.delete()
             else: # In public channel
                 await channel.delete()
-                await ctx.message.delete(delay=MSG_DELETE_DELAY)
-                await ctx.message.reply(embed=success_embed_template("あなたのプライベートチャンネルを削除しました。"), delete_after=MSG_DELETE_DELAY)
+                await ctx.response.send_message(embed=success_embed_template("あなたのプライベートチャンネルを削除しました。"), ephemeral=True)
         except (discord.NotFound, discord.HTTPException):
             logger.error("Failed to delete private channel.")
-            await ctx.send(embed=error_embed_template("プライベートチャンネルの削除に失敗しました。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("プライベートチャンネルの削除に失敗しました。"), ephemeral=True)
 
-    @commands.command(description="Invite user to private channel [For public channel use only]")
-    async def pvch_invite(self, ctx: commands.Context):
+    @app_commands.command(name="pvch_invite", description="自分のプライベートチャンネルにユーザーを招待する")
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_invite(self, ctx: discord.Interaction, invite_user: discord.Member):
         """Invite user to private channel"""
         if ctx.channel.category_id == CATEGORY_ID:
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("このコマンドはプライベートチャンネル内では実行できません。"), ephemeral=True)
             return
         
-        user_id: int = ctx.author.id
+        user_id: int = ctx.user.id
         pvch: Optional[PrivateChannel] = self.used_pvch_userid.get(user_id)
         if pvch is None:
-            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `$pvch_create @user [@user...]`でユーザーを招待して作成することができます。"
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
+            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `/pvch_create @user`でユーザーを招待して作成することができます。"
+            await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
 
-        mentions_members: list[discord.Member] = ctx.message.mentions
-        if len(mentions_members) == 0:
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("招待するユーザーを指定してください。"), delete_after=MSG_DELETE_DELAY)
-            return
-
-        embed: Embed = await self.invite(pvch.channel, user_id, mentions_members)
-
+        embed: Embed = await self.invite(pvch.channel, user_id, invite_user)
         try:
             await pvch.channel.send(embed=embed)
-            await ctx.message.reply(embed=info_embed_template("プライベートチャンネルをご確認ください。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=info_embed_template("プライベートチャンネルをご確認ください。"), ephemeral=True)
         except discord.HTTPException:
             logger.error("Failed to send message to private channel.")
-        await ctx.message.delete(delay=MSG_DELETE_DELAY)
 
-    async def invite(self, channel: TextChannel, user_id: int, mentions_members: list[discord.Member]) -> Embed:
+    async def invite(self, channel: TextChannel, exe_user_id: int, user: discord.Member) -> Embed:
         """User Invitation"""
-        success_members: list[str] = []
-        failed_members: list[str] = []
-        ignore_members: list[str] = []
-
-        for member in mentions_members:
-            if member.bot or member.id == user_id or member.roles[-1].id == MODERATOR_ROLE_ID:
-                ignore_members.append(member.name)
-                continue
-
-            try:
-                await channel.set_permissions(member, read_messages=True, send_messages=True)
-                success_members.append(member.name)
-            except discord.HTTPException:
-                failed_members.append(member.name)
-
         embed: Embed = Embed(title="プライベートチャンネル招待", color=0x9b59b6)
-        if len(success_members) > 0:
-            embed.add_field(name="成功", value="- "+"\n- ".join(success_members), inline=False)
-        if len(failed_members) > 0:
-            embed.add_field(name="失敗", value="- "+"\n- ".join(failed_members), inline=False)
-        if len(ignore_members) > 0:
-            embed.add_field(name="無効", value="- "+"\n- ".join(ignore_members), inline=False)
+        name: str = ""
+        if user.bot or user.id == exe_user_id or user.roles[0].id == MODERATOR_ROLE_ID:
+            name = "無効"
+        else:
+            try:
+                await channel.set_permissions(user, read_messages=True, send_messages=True)
+                name = "成功"
+            except discord.HTTPException:
+                name = "失敗"
+
+        embed.add_field(name=name, value=user.name if user.global_name is None else user.global_name, inline=False)
         return embed
 
-    @commands.command(description="Leave private channel")
-    async def pvch_leave(self, ctx: commands.Context):
+    @app_commands.command(name="pvch_leave", description="他者のプライベートチャンネルを離脱する")
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_leave(self, ctx: discord.Interaction):
         """Leave private channel"""
         if ctx.channel.category_id != CATEGORY_ID:
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), ephemeral=True)
             return
 
-        this_user_ch: Optional[PrivateChannel] = self.used_pvch_userid.get(ctx.author.id)
-        if this_user_ch is not None and this_user_ch.channel.id == ctx.channel.id:
-            await ctx.message.reply(embed=error_embed_template("このコマンドはこのプライベートチャンネルの作成者は実行できません。\n\nヒント: `$pvch_delete`で削除することができます。"))
+        pvch: Optional[PrivateChannel] = self.used_pvch_userid.get(ctx.user.id)
+        if pvch is not None and pvch.channel.id == ctx.channel.id:
+            await ctx.response.send_message(embed=error_embed_template("このコマンドはこのプライベートチャンネルの作成者は実行できません。\n\nヒント: `/pvch_delete`で削除することができます。"),
+                                            ephemeral=True)
             return
 
         try:
-            await ctx.channel.set_permissions(ctx.author, overwrite=None)
-            await ctx.message.reply(embed=info_embed_template(f"{ctx.author.global_name}さんがプライベートチャンネルを退出しました。"))
+            await ctx.channel.set_permissions(ctx.user, overwrite=None)
+            await ctx.response.send_message(embed=info_embed_template(f"{ctx.user.global_name}さんがプライベートチャンネルを退出しました。"))
         except discord.HTTPException:
             logger.error("Failed to leave private channel.")
-            await ctx.message.reply(embed=error_embed_template("プライベートチャンネルの退出に失敗しました。"))
-            return
+            await ctx.response.send_message(embed=error_embed_template("プライベートチャンネルの退出に失敗しました。"), ephemeral=True)
 
-    @commands.command(description="Kick private channel")
-    async def pvch_kick(self, ctx: commands.Context):
+    @app_commands.command(name="pvch_kick", description="自分のプライベートチャンネルからユーザーを追放する")
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_kick(self, ctx: discord.Interaction, kick_user: discord.Member):
         """Kick private channel"""
-        pvch: Optional[PrivateChannel] = self.used_pvch_userid.get(ctx.author.id)
-
         if ctx.channel.category_id != CATEGORY_ID:
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), delete_after=MSG_DELETE_DELAY)
-            return
-        if pvch is None or ctx.channel.id != pvch.channel.id:  # In someone else's private channel
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
-            return
-        
-        mentions_members: list[discord.Member] = ctx.message.mentions
-        if len(mentions_members) == 0:
-            await ctx.message.delete(delay=MSG_DELETE_DELAY)
-            await ctx.message.reply(embed=error_embed_template("追放するユーザーを指定してください。"), delete_after=MSG_DELETE_DELAY)
+            await ctx.response.send_message(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), ephemeral=True)
             return
 
-        embed: Embed = await self.kick(pvch.channel, ctx.author.id, mentions_members)
+        pvch: Optional[PrivateChannel] = self.used_pvch_userid.get(ctx.user.id)
+        if pvch is None or pvch.channel.id != ctx.channel.id:  # In someone else's private channel
+            await ctx.response.send_message(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), ephemeral=True)
+            return
 
+        embed: Embed = await self.kick(pvch.channel, ctx.user.id, kick_user)
         try:
-            await pvch.channel.send(embed=embed)
+            await ctx.response.send_message(embed=embed)
         except discord.HTTPException:
             logger.error("Failed to leave private channel.")
 
-    async def kick(self, channel: TextChannel, user_id: int, mentions_members: list[discord.Member]) -> Embed:
+    async def kick(self, channel: TextChannel, exe_user_id: int, user: discord.Member) -> Embed:
         """User Kick"""
-        success_members: list[str] = []
-        failed_members: list[str] = []
-        ignore_members: list[str] = []
-
-        for member in mentions_members:
-            if member.bot or member.id == user_id or member.roles[-1].id == MODERATOR_ROLE_ID:
-                ignore_members.append(member.name)
-                continue
-
-            try:
-                await channel.set_permissions(member, overwrite=None)
-                success_members.append(member.name)
-            except discord.HTTPException:
-                failed_members.append(member.name)
-
         embed: Embed = Embed(title="プライベートチャンネル追放", color=0xf1c40f)
-        if len(success_members) > 0:
-            embed.add_field(name="成功", value="- "+"\n- ".join(success_members), inline=False)
-        if len(failed_members) > 0:
-            embed.add_field(name="失敗", value="- "+"\n- ".join(failed_members), inline=False)
-        if len(ignore_members) > 0:
-            embed.add_field(name="無効", value="- "+"\n- ".join(ignore_members), inline=False)
+        name: str = ""
+        if user.bot or user.id == exe_user_id or user.roles[0].id == MODERATOR_ROLE_ID:
+            name = "無効"
+        else:
+            try:
+                await channel.set_permissions(user, overwrite=None)
+                name = "成功"
+            except discord.HTTPException:
+                name = "失敗"
+
+        embed.add_field(name=name, value=user.name if user.global_name is None else user.global_name, inline=False)
         return embed
 
 
