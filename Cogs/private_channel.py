@@ -3,17 +3,32 @@ from discord import Guild, CategoryChannel, TextChannel, Embed
 from discord.ext import commands
 import asyncio
 
-from datetime import timezone, timedelta
+from datetime import datetime, timezone, timedelta
 from loguru import logger
 from typing import Optional
 
 from utils.embed_template import success_embed_template, error_embed_template, info_embed_template
 
-from settings import GUILD_NAME, GUILD_ID, CATEGORY_ID, MODERATOR_ROLE_ID, GENERAL_ROLE_ID
+from settings import *
 
-MSG_DELETE_DELAY = 5.0
 
-class PrivateChannel(commands.Cog):
+class PrivateChannel:
+    def __init__(self, user_id: int, channel: TextChannel):
+        self.user_id: int = user_id
+        self.channel: TextChannel = channel
+        self.exp: datetime = channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(hours=24)
+
+    def __str__(self):
+        return f"PrivateChannel(user_id={self.user_id}, channel={self.channel}, exp={self.exp})"
+
+    def extension_exp(self):
+        self.exp = datetime.utcnow() + timedelta(hours=15)  # UTC+9(JST) + 6h(extension)
+
+    def is_expired(self):
+        return True if self.exp <= (datetime.utcnow() + timedelta(hours=9)) else False
+
+
+class PrivateChannelBot(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot: commands.Bot = bot
 
@@ -33,12 +48,7 @@ class PrivateChannel(commands.Cog):
             self.guild.me: discord.PermissionOverwrite(read_messages=True)
         }
 
-        self.used_pvch_userid: dict[int, TextChannel] = {}
-
-    @commands.command(description="Display help")
-    async def pvch_help(self, ctx: commands.Context):
-        # TODO : ヘルプの表示
-        pass
+        self.used_pvch_userid: dict[int, PrivateChannel] = {}
 
     @commands.command(description="Create private channel [For public channel use only]")
     async def pvch_create(self, ctx: commands.Context):
@@ -50,9 +60,9 @@ class PrivateChannel(commands.Cog):
 
         user_id: int = ctx.author.id
         # Check if private channels already exists.
-        if (ch := self.used_pvch_userid.get(user_id)) is not None:
-            if self.guild.get_channel(ch.id) is not None:
-                msg: str = f"あなたのプライベートチャンネル{self.used_pvch_userid[user_id].mention}は既に存在します。\n\nヒント: `$pvch_delete`でプライベートチャンネルを削除することができます。"
+        if (pvch := self.used_pvch_userid.get(user_id)) is not None:
+            if self.guild.get_channel(pvch.channel.id) is not None:
+                msg: str = f"あなたのプライベートチャンネル{pvch.channel.mention}は既に存在します。\n\nヒント: `$pvch_delete`でプライベートチャンネルを削除することができます。"
                 await ctx.message.delete(delay=MSG_DELETE_DELAY)
                 await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
                 return
@@ -76,7 +86,7 @@ class PrivateChannel(commands.Cog):
 
         await ctx.message.delete(delay=MSG_DELETE_DELAY)
         await ctx.message.reply(embed=success_embed_template(f"{channel.mention}を作成しました。"), delete_after=MSG_DELETE_DELAY)
-        self.used_pvch_userid[user_id] = channel
+        self.used_pvch_userid[user_id] = PrivateChannel(user_id, channel)
 
         await self.init_private_channel(channel)
         if invite_embed is not None:
@@ -88,7 +98,7 @@ class PrivateChannel(commands.Cog):
 このチャンネルはあなたとあなたが招待した方のみ閲覧できます。(ただし、権限者は閲覧可)\n
 チャンネルは作成から24時間経過すると自動的に削除されます。`$pvch_delete`で手動で削除することもできます。\n
 """
-        channel_exp: str = (channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(days=1)).strftime("%Y/%m/%d %H:%M:%S")
+        channel_exp: str = (channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(hours=24)).strftime("%Y/%m/%d %H:%M:%S")
         embed: Embed = Embed(title="ようこそ！ここはプライベートチャンネルです！", description=msg, color=0x3498db)
         embed.add_field(name="注意", value=f"プライベートチャンネルにおいても{GUILD_NAME} Discordサーバー利用におけるガイドラインは適用されます。", inline=False)
         embed.add_field(name="チャンネル有効期限", value=f"{channel_exp}", inline=False)
@@ -100,13 +110,14 @@ class PrivateChannel(commands.Cog):
     @commands.command(description="Delete private channel")
     async def pvch_delete(self, ctx: commands.Context):
         """Delete private channel"""
-        channel: Optional[TextChannel] = self.used_pvch_userid.pop(ctx.author.id, None)
-        if channel is None:
+        pvch: Optional[PrivateChannel] = self.used_pvch_userid.pop(ctx.author.id, None)
+        if pvch is None:
             msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `$pvch_create`で作成することができます。"
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
             await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
             return
     
+        channel: TextChannel = pvch.channel
         if ctx.channel.category_id == CATEGORY_ID and ctx.channel.id != channel.id:  # In someone else's private channel
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
             await ctx.message.reply(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
@@ -135,8 +146,8 @@ class PrivateChannel(commands.Cog):
             return
         
         user_id: int = ctx.author.id
-        channel: Optional[TextChannel] = self.used_pvch_userid.get(user_id)
-        if channel is None:
+        pvch: Optional[PrivateChannel] = self.used_pvch_userid.get(user_id)
+        if pvch is None:
             msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `$pvch_create @user [@user...]`でユーザーを招待して作成することができます。"
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
             await ctx.message.reply(embed=error_embed_template(msg), delete_after=MSG_DELETE_DELAY)
@@ -148,10 +159,10 @@ class PrivateChannel(commands.Cog):
             await ctx.message.reply(embed=error_embed_template("招待するユーザーを指定してください。"), delete_after=MSG_DELETE_DELAY)
             return
 
-        embed: Embed = await self.invite(channel, user_id, mentions_members)
+        embed: Embed = await self.invite(pvch.channel, user_id, mentions_members)
 
         try:
-            await channel.send(embed=embed)
+            await pvch.channel.send(embed=embed)
             await ctx.message.reply(embed=info_embed_template("プライベートチャンネルをご確認ください。"), delete_after=MSG_DELETE_DELAY)
         except discord.HTTPException:
             logger.error("Failed to send message to private channel.")
@@ -191,8 +202,8 @@ class PrivateChannel(commands.Cog):
             await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), delete_after=MSG_DELETE_DELAY)
             return
 
-        this_user_ch: Optional[TextChannel] = self.used_pvch_userid.get(ctx.author.id)
-        if this_user_ch is not None and this_user_ch.id == ctx.channel.id:
+        this_user_ch: Optional[PrivateChannel] = self.used_pvch_userid.get(ctx.author.id)
+        if this_user_ch is not None and this_user_ch.channel.id == ctx.channel.id:
             await ctx.message.reply(embed=error_embed_template("このコマンドはこのプライベートチャンネルの作成者は実行できません。\n\nヒント: `$pvch_delete`で削除することができます。"))
             return
 
@@ -207,13 +218,13 @@ class PrivateChannel(commands.Cog):
     @commands.command(description="Kick private channel")
     async def pvch_kick(self, ctx: commands.Context):
         """Kick private channel"""
-        channel: Optional[TextChannel] = self.used_pvch_userid.get(ctx.author.id)
+        pvch: Optional[PrivateChannel] = self.used_pvch_userid.get(ctx.author.id)
 
         if ctx.channel.category_id != CATEGORY_ID:
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
             await ctx.message.reply(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), delete_after=MSG_DELETE_DELAY)
             return
-        if channel is None or ctx.channel.id != channel.id:  # In someone else's private channel
+        if pvch is None or ctx.channel.id != pvch.channel.id:  # In someone else's private channel
             await ctx.message.delete(delay=MSG_DELETE_DELAY)
             await ctx.message.reply(embed=error_embed_template("このコマンドは他人のプライベートチャンネル内では実行できません。"), delete_after=MSG_DELETE_DELAY)
             return
@@ -224,10 +235,10 @@ class PrivateChannel(commands.Cog):
             await ctx.message.reply(embed=error_embed_template("追放するユーザーを指定してください。"), delete_after=MSG_DELETE_DELAY)
             return
 
-        embed: Embed = await self.kick(channel, ctx.author.id, mentions_members)
+        embed: Embed = await self.kick(pvch.channel, ctx.author.id, mentions_members)
 
         try:
-            await channel.send(embed=embed)
+            await pvch.channel.send(embed=embed)
         except discord.HTTPException:
             logger.error("Failed to leave private channel.")
 
@@ -264,11 +275,10 @@ class PrivateChannel(commands.Cog):
 # TODO : 延長機能の実装
     # 最大6時間延長 延長時点から+6h
     # 作成してから18時間(=24h-6h)以上経過してから延長できる
-# TODO : コマンド候補リスト表示..
 # TODO : admin専用コマンドの作成
     # 他人のプライベートチャンネル削除
 # TODO : クールダウンの設定
 # TODO : テンプレート機能の実装
 
 def setup(bot: commands.Bot):
-    return bot.add_cog(PrivateChannel(bot))
+    return bot.add_cog(PrivateChannelBot(bot))
