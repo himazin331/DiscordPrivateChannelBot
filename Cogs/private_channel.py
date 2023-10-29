@@ -54,7 +54,6 @@ class PrivateChannel:
             del used_pvch_userid[self.user_id]
         except (discord.NotFound, discord.HTTPException):
             logger.error("Failed to delete private channel.")
-            await ctx.followup.send(embed=error_embed_template("プライベートチャンネルの削除に失敗しました。"), ephemeral=True)
 
     async def invite_user(self, users: list[discord.Member]) -> Embed:
         """User Invitation"""
@@ -167,7 +166,12 @@ class PrivateChannelBot(commands.Cog):
         await self.bot.tree.sync(guild=discord.Object(GUILD_ID))
         await self.bot.change_presence(activity=discord.Game("running..."))
 
+    async def cog_app_command_error(self, ctx: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.CommandOnCooldown):
+            await ctx.response.send_message(f"クールダウン中...\n`{str(error)}`", ephemeral=True)
+
     @app_commands.command(name="pvch_help", description="ヘルプを表示する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_help(self, ctx: discord.Interaction):
         embed: Embed = Embed(title="コマンドヘルプ", color=0x979c9f)
@@ -176,6 +180,7 @@ class PrivateChannelBot(commands.Cog):
         await ctx.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="pvch_create", description="自分のプライベートチャンネルを作成する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_create(self, ctx: discord.Interaction):
         """Create private channel"""
@@ -217,6 +222,7 @@ class PrivateChannelBot(commands.Cog):
         await ctx.response.send_message(embed=success_embed_template(msg), view=view, ephemeral=True)
 
     @app_commands.command(name="pvch_delete", description="自分のプライベートチャンネルを削除する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_delete(self, ctx: discord.Interaction):
         """Delete private channel"""
@@ -234,6 +240,7 @@ class PrivateChannelBot(commands.Cog):
         await ctx.response.send_message(embed=warning_embed_template("本当にこのプライベートチャンネルを削除しますか？"), view=view, ephemeral=True)
 
     @app_commands.command(name="pvch_invite", description="自分のプライベートチャンネルにユーザーを招待する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_invite(self, ctx: discord.Interaction):
         """Invite user to private channel"""
@@ -243,7 +250,7 @@ class PrivateChannelBot(commands.Cog):
         
         pvch: Optional[PrivateChannel] = used_pvch_userid.get(ctx.user.id)
         if pvch is None:
-            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `/pvch_create`でユーザーを招待して作成することができます。"
+            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `/pvch_create`で作成することができます。"
             await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
 
@@ -251,6 +258,7 @@ class PrivateChannelBot(commands.Cog):
         await ctx.response.send_message(embed=invite_embed_template("招待するユーザーを指定してください。"), view=view, ephemeral=True)
 
     @app_commands.command(name="pvch_leave", description="他者のプライベートチャンネルを離脱する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_leave(self, ctx: discord.Interaction):
         """Leave private channel"""
@@ -272,6 +280,7 @@ class PrivateChannelBot(commands.Cog):
             await ctx.response.send_message(embed=error_embed_template("プライベートチャンネルの退出に失敗しました。"), ephemeral=True)
 
     @app_commands.command(name="pvch_kick", description="自分のプライベートチャンネルからユーザーを追放する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_kick(self, ctx: discord.Interaction):
         """Kick private channel"""
@@ -288,12 +297,13 @@ class PrivateChannelBot(commands.Cog):
         await ctx.response.send_message(embed=kick_embed_template("追放するユーザーを指定してください。"), view=view, ephemeral=True)
 
     @app_commands.command(name="pvch_extend", description=f"自分のプライベートチャンネルの有効期限を最大{EXTEND_EXP_HOUR}時間延長する")
+    @app_commands.checks.cooldown(1, 180.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_extend(self, ctx: discord.Interaction):
         """Extend private channel"""
         pvch: Optional[PrivateChannel] = used_pvch_userid.get(ctx.user.id)
         if pvch is None:
-            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `/pvch_create`でユーザーを招待して作成することができます。"
+            msg: str = "あなたはまだプライベートチャンネルを作成していないようです。\n\nヒント: `/pvch_create`で作成することができます。"
             await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
 
@@ -304,6 +314,46 @@ class PrivateChannelBot(commands.Cog):
         extended: bool = await pvch.extension_exp(ctx)
         if extended:
             self.sort_used_pvch_userid()
+
+    @app_commands.command(name="pvch_admin_delete", description="[権限者専用] プライベートチャンネルの削除")
+    @app_commands.checks.cooldown(3, 10.0, key=lambda i: (i.guild_id, i.user.id))
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_admin_delete(self, ctx: discord.Interaction, pv_user: discord.User):
+        pvch: PrivateChannel = used_pvch_userid.get(pv_user.id)
+        if pvch is None:
+            msg: str = f"指定した{pv_user.mention}のプライベートチャンネルが見つかりませんでした。"
+            await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
+            return
+
+        view: DeletePrivateChannel = DeletePrivateChannel(pvch, admin=True)
+        await ctx.response.send_message(embed=warning_embed_template(f"本当に{pvch.channel.mention}を削除しますか？"), view=view, ephemeral=True)
+
+    @app_commands.command(name="pvch_admin_kick", description="[権限者専用] プライベートチャンネルからユーザーを追放")
+    @app_commands.checks.cooldown(3, 10.0, key=lambda i: (i.guild_id, i.user.id))
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guilds(GUILD_ID)
+    async def pvch_admin_kick(self, ctx: discord.Interaction, private_channel: discord.TextChannel, pv_user: discord.User):
+        if private_channel.category_id != CATEGORY_ID:
+            msg: str = f"指定した{private_channel.mention}はプライベートチャンネルではありません。"
+            await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
+            return
+        
+        if pv_user.bot:
+            msg: str = f"指定した{pv_user.mention}はこのボットです。"
+            await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
+            return
+            
+        if private_channel.id == used_pvch_userid.get(pv_user.id).channel.id:
+            msg: str = f"指定した{pv_user.mention}はこのプライベートチャンネルの作成者です。"
+            await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
+            return
+            
+        try:
+            await private_channel.set_permissions(pv_user, overwrite=None)
+            await ctx.response.send_message(embed=kick_embed_template("成功"), ephemeral=True)
+        except discord.HTTPException:
+            await ctx.response.send_message(embed=kick_embed_template("失敗"), ephemeral=True)
 
     def sort_used_pvch_userid(self):
         """Sort the user's private channel list"""
@@ -324,11 +374,6 @@ class PrivateChannelBot(commands.Cog):
                 pvch: PrivateChannel = used_pvch_userid[user_id]
                 await pvch.force_delete()
 
-
-# TODO : admin専用コマンドの作成
-    # 他人のプライベートチャンネル削除
-# TODO : クールダウンの設定
-# TODO : テンプレート機能の実装
 
 def setup(bot: commands.Bot):
     return bot.add_cog(PrivateChannelBot(bot))

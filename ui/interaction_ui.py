@@ -32,16 +32,20 @@ class KickUserSelect(View):
 
 
 class DeletePrivateChannel(View):
-    def __init__(self, pvch: 'private_channel.PrivateChannel'):
+    def __init__(self, pvch: 'private_channel.PrivateChannel', admin: bool = False):
         super().__init__()
         self.pvch: 'private_channel.PrivateChannel' = pvch
+        self.admin: bool = admin
 
     @discord.ui.button(label="はい", style=discord.ButtonStyle.red)
     async def ok(self, ctx: discord.Interaction, button: Button):
         button.disabled = True
         self.cancel_.disabled = True
         await ctx.response.edit_message(view=self)
-        await self.pvch.delete_channel(ctx)
+        if self.admin:
+            await self.pvch.force_delete()
+        else:
+            await self.pvch.delete_channel(ctx)
 
     @discord.ui.button(label="キャンセル", style=discord.ButtonStyle.gray)
     async def cancel_(self, ctx: discord.Interaction, button: Button):
