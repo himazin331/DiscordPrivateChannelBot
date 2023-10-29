@@ -17,7 +17,7 @@ class PrivateChannel:
     def __init__(self, user_id: int, channel: TextChannel):
         self.user_id: int = user_id
         self.channel: TextChannel = channel
-        self.exp: datetime = channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(minutes=CHANNEL_TTL_HOUR)
+        self.exp: datetime = channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(hours=CHANNEL_TTL_HOUR)
         self.delete_notice: bool = False
 
     def __str__(self) -> str:
