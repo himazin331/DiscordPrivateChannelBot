@@ -7,6 +7,7 @@ from utils.embed_template import info_embed_template
 
 
 class InviteUserSelect(View):
+    """User invitation select box"""
     def __init__(self, pvch: 'private_channel.PrivateChannel'):
         super().__init__()
         self.pvch: 'private_channel.PrivateChannel' = pvch
@@ -20,6 +21,7 @@ class InviteUserSelect(View):
 
 
 class KickUserSelect(View):
+    """User kick select box"""
     def __init__(self, pvch: 'private_channel.PrivateChannel'):
         super().__init__()
         self.pvch: 'private_channel.PrivateChannel' = pvch
@@ -32,6 +34,7 @@ class KickUserSelect(View):
 
 
 class DeletePrivateChannel(View):
+    """Channel deletion confirmation button"""
     def __init__(self, pvch: 'private_channel.PrivateChannel', admin: bool = False):
         super().__init__()
         self.pvch: 'private_channel.PrivateChannel' = pvch
@@ -43,7 +46,7 @@ class DeletePrivateChannel(View):
         self.cancel_.disabled = True
         await ctx.response.edit_message(view=self)
         if self.admin:
-            await self.pvch.force_delete()
+            await self.pvch.force_delete()  # Deletion by Authorized Person
         else:
             await self.pvch.delete_channel(ctx)
 

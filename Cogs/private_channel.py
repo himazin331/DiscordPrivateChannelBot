@@ -17,7 +17,7 @@ class PrivateChannel:
     def __init__(self, user_id: int, channel: TextChannel):
         self.user_id: int = user_id
         self.channel: TextChannel = channel
-        self.exp: datetime = channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(minutes=CHANNEL_DELETE_EXP_HOUR)
+        self.exp: datetime = channel.created_at.astimezone(timezone(timedelta(hours=9))) + timedelta(minutes=CHANNEL_TTL_HOUR)
         self.delete_notice: bool = False
 
     def __str__(self) -> str:
@@ -49,6 +49,7 @@ class PrivateChannel:
             await ctx.followup.send(embed=error_embed_template("プライベートチャンネルの削除に失敗しました。"), ephemeral=True)
 
     async def force_delete(self):
+        """Forced deletion (automatic deletion or deletion by authority)"""
         try:
             await self.channel.delete()
             del used_pvch_userid[self.user_id]
@@ -109,10 +110,10 @@ class PrivateChannel:
 
     async def extension_exp(self, ctx: discord.Interaction) -> bool:
         """Extend private channel expiration date"""
-        new_exp: datetime = datetime.now().astimezone(timezone(timedelta(hours=9))) + timedelta(hours=EXTEND_EXP_HOUR)
+        new_exp: datetime = datetime.now().astimezone(timezone(timedelta(hours=9))) + timedelta(hours=EXTEND_TTL_HOUR)
         if new_exp < self.exp:
             msg: str = f"""現在、有効期限を延長できません。\n
-延長が可能になる時刻は`{(self.exp - timedelta(hours=EXTEND_EXP_HOUR) + timedelta(minutes=1)).strftime('%Y/%m/%d　%H:%M:%S')}`からです。"""
+延長が可能になる時刻は`{(self.exp - timedelta(hours=EXTEND_TTL_HOUR) + timedelta(minutes=1)).strftime('%Y/%m/%d　%H:%M:%S')}`からです。"""
             await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return False
         self.exp = new_exp
@@ -123,6 +124,7 @@ class PrivateChannel:
         else: # In public channel
             await ctx.response.send_message(embed=success_embed_template(msg), ephemeral=True)
 
+        # Welcome message updated
         pinned_messages = await ctx.channel.pins()
         if len(pinned_messages) == 0:
             return True
@@ -145,7 +147,7 @@ class PrivateChannel:
         return False
 
 
-used_pvch_userid: dict[int, PrivateChannel] = {}
+used_pvch_userid: dict[int, PrivateChannel] = {}  # {user_id: PrivateChannel}
 
 class PrivateChannelBot(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -167,13 +169,14 @@ class PrivateChannelBot(commands.Cog):
         await self.bot.change_presence(activity=discord.Game("running..."))
 
     async def cog_app_command_error(self, ctx: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.CommandOnCooldown):
+        if isinstance(error, app_commands.CommandOnCooldown):  # Cooldown error message
             await ctx.response.send_message(f"クールダウン中...\n`{str(error)}`", ephemeral=True)
 
     @app_commands.command(name="pvch_help", description="ヘルプを表示する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_help(self, ctx: discord.Interaction):
+        """Display command help"""
         embed: Embed = Embed(title="コマンドヘルプ", color=0x979c9f)
         for cmd in self.bot.tree.walk_commands(guild=self.guild):
             embed.add_field(name=f"`/{cmd.name}`", value=cmd.description, inline=False)
@@ -296,7 +299,7 @@ class PrivateChannelBot(commands.Cog):
         view: KickUserSelect = KickUserSelect(pvch)
         await ctx.response.send_message(embed=kick_embed_template("追放するユーザーを指定してください。"), view=view, ephemeral=True)
 
-    @app_commands.command(name="pvch_extend", description=f"自分のプライベートチャンネルの有効期限を最大{EXTEND_EXP_HOUR}時間延長する")
+    @app_commands.command(name="pvch_extend", description=f"自分のプライベートチャンネルの有効期限を最大{EXTEND_TTL_HOUR}時間延長する")
     @app_commands.checks.cooldown(1, 180.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.guilds(GUILD_ID)
     async def pvch_extend(self, ctx: discord.Interaction):
@@ -320,6 +323,7 @@ class PrivateChannelBot(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.guilds(GUILD_ID)
     async def pvch_admin_delete(self, ctx: discord.Interaction, pv_user: discord.User):
+        """[Admin only] Delete private channel"""
         pvch: PrivateChannel = used_pvch_userid.get(pv_user.id)
         if pvch is None:
             msg: str = f"指定した{pv_user.mention}のプライベートチャンネルが見つかりませんでした。"
@@ -334,21 +338,23 @@ class PrivateChannelBot(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     @app_commands.guilds(GUILD_ID)
     async def pvch_admin_kick(self, ctx: discord.Interaction, private_channel: discord.TextChannel, pv_user: discord.User):
+        """[Admin only] Kick private channel"""
         if private_channel.category_id != CATEGORY_ID:
             msg: str = f"指定した{private_channel.mention}はプライベートチャンネルではありません。"
             await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
-        
+
         if pv_user.bot:
             msg: str = f"指定した{pv_user.mention}はこのボットです。"
             await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
-            
-        if private_channel.id == used_pvch_userid.get(pv_user.id).channel.id:
+
+        pvch: int = used_pvch_userid.get(pv_user.id)
+        if pvch is not None and private_channel.id == pvch.channel.id:
             msg: str = f"指定した{pv_user.mention}はこのプライベートチャンネルの作成者です。"
             await ctx.response.send_message(embed=error_embed_template(msg), ephemeral=True)
             return
-            
+
         try:
             await private_channel.set_permissions(pv_user, overwrite=None)
             await ctx.response.send_message(embed=kick_embed_template("成功"), ephemeral=True)
@@ -369,6 +375,7 @@ class PrivateChannelBot(commands.Cog):
             else:
                 break
 
+        # Automatic deletion
         if len(delete_pvchs) > 0:
             for user_id in delete_pvchs:
                 pvch: PrivateChannel = used_pvch_userid[user_id]

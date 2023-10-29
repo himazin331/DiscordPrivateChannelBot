@@ -2,7 +2,8 @@ from discord import Embed
 
 from typing import Optional
 
-from settings import GUILD_NAME, CHANNEL_DELETE_EXP_HOUR
+from settings import GUILD_NAME, CHANNEL_TTL_HOUR
+
 
 def success_embed_template(message: str) -> Embed:
     embed: Embed = Embed(title="成功", description=message, color=0x00ff00)
@@ -31,7 +32,7 @@ def kick_embed_template(message: Optional[str] = None) -> Embed:
 def welcome_embed_template(exp: str) -> Embed:
     msg: str = f"""
 このチャンネルはあなたとあなたが招待した方のみ閲覧できます。(ただし、権限者は閲覧可)\n
-チャンネルは**作成から{CHANNEL_DELETE_EXP_HOUR}時間経過すると自動的に削除**されます。`/pvch_delete`で手動で削除することもできます。\n
+チャンネルは**作成から{CHANNEL_TTL_HOUR}時間経過すると自動的に削除**されます。`/pvch_delete`で手動で削除することもできます。\n
 """
     embed: Embed = Embed(title="ようこそ！ここはプライベートチャンネルです！", description=msg, color=0x3498db)
     embed.add_field(name="注意", value=f"プライベートチャンネルにおいても{GUILD_NAME} Discordサーバー利用におけるガイドラインは適用されます。", inline=False)
