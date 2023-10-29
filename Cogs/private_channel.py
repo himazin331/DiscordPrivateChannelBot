@@ -165,7 +165,7 @@ class PrivateChannelBot(commands.Cog):
 
         self.check_pv_exp.start()
 
-        await self.bot.tree.sync(guild=discord.Object(GUILD_ID))
+        await self.bot.tree.sync()
         await self.bot.change_presence(activity=discord.Game("running..."))
 
     async def cog_app_command_error(self, ctx: discord.Interaction, error: app_commands.AppCommandError):
@@ -174,17 +174,15 @@ class PrivateChannelBot(commands.Cog):
 
     @app_commands.command(name="pvch_help", description="ヘルプを表示する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_help(self, ctx: discord.Interaction):
         """Display command help"""
         embed: Embed = Embed(title="コマンドヘルプ", color=0x979c9f)
-        for cmd in self.bot.tree.walk_commands(guild=self.guild):
+        for cmd in self.bot.tree.walk_commands():
             embed.add_field(name=f"`/{cmd.name}`", value=cmd.description, inline=False)
         await ctx.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="pvch_create", description="自分のプライベートチャンネルを作成する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_create(self, ctx: discord.Interaction):
         """Create private channel"""
         if ctx.channel.category_id == CATEGORY_ID:
@@ -203,14 +201,15 @@ class PrivateChannelBot(commands.Cog):
 
         # Create private channel
         ch_name: str = f"pvch-{ctx.user.global_name}"
-        ch_permission: dict = {
-            self.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            self.guild.get_role(MODERATOR_ROLE_ID): discord.PermissionOverwrite(read_messages=True),
-            self.guild.me: discord.PermissionOverwrite(read_messages=True),
-            ctx.user: discord.PermissionOverwrite(read_messages=True)
-        }
+        # ch_permission: dict = {
+        #     self.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        #     self.guild.get_role(MODERATOR_ROLE_ID): discord.PermissionOverwrite(read_messages=True),
+        #     self.guild.me: discord.PermissionOverwrite(read_messages=True),
+        #     ctx.user: discord.PermissionOverwrite(read_messages=True, )
+        # }
         try:
-            channel: TextChannel = await self.category.create_text_channel(name=ch_name, overwrites=ch_permission)
+            channel: TextChannel = await self.category.create_text_channel(name=ch_name)
+            await channel.set_permissions(ctx.user, read_messages=True)
         except discord.HTTPException:
             logger.error("Failed to create private channel.")
             await ctx.response.send_message(embed=error_embed_template("プライベートチャンネルの作成に失敗しました。"), ephemeral=True)
@@ -226,7 +225,6 @@ class PrivateChannelBot(commands.Cog):
 
     @app_commands.command(name="pvch_delete", description="自分のプライベートチャンネルを削除する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_delete(self, ctx: discord.Interaction):
         """Delete private channel"""
         pvch: Optional[PrivateChannel] = used_pvch_userid.get(ctx.user.id)
@@ -244,7 +242,6 @@ class PrivateChannelBot(commands.Cog):
 
     @app_commands.command(name="pvch_invite", description="自分のプライベートチャンネルにユーザーを招待する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_invite(self, ctx: discord.Interaction):
         """Invite user to private channel"""
         if ctx.channel.category_id == CATEGORY_ID:
@@ -262,7 +259,6 @@ class PrivateChannelBot(commands.Cog):
 
     @app_commands.command(name="pvch_leave", description="他者のプライベートチャンネルを離脱する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_leave(self, ctx: discord.Interaction):
         """Leave private channel"""
         if ctx.channel.category_id != CATEGORY_ID:
@@ -284,7 +280,6 @@ class PrivateChannelBot(commands.Cog):
 
     @app_commands.command(name="pvch_kick", description="自分のプライベートチャンネルからユーザーを追放する")
     @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_kick(self, ctx: discord.Interaction):
         """Kick private channel"""
         if ctx.channel.category_id != CATEGORY_ID:
@@ -301,7 +296,6 @@ class PrivateChannelBot(commands.Cog):
 
     @app_commands.command(name="pvch_extend", description=f"自分のプライベートチャンネルの有効期限を最大{EXTEND_TTL_HOUR}時間延長する")
     @app_commands.checks.cooldown(1, 180.0, key=lambda i: (i.guild_id, i.user.id))
-    @app_commands.guilds(GUILD_ID)
     async def pvch_extend(self, ctx: discord.Interaction):
         """Extend private channel"""
         pvch: Optional[PrivateChannel] = used_pvch_userid.get(ctx.user.id)
@@ -321,7 +315,6 @@ class PrivateChannelBot(commands.Cog):
     @app_commands.command(name="pvch_admin_delete", description="[権限者専用] プライベートチャンネルの削除")
     @app_commands.checks.cooldown(3, 10.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.default_permissions(administrator=True)
-    @app_commands.guilds(GUILD_ID)
     async def pvch_admin_delete(self, ctx: discord.Interaction, pv_user: discord.User):
         """[Admin only] Delete private channel"""
         pvch: PrivateChannel = used_pvch_userid.get(pv_user.id)
@@ -336,7 +329,6 @@ class PrivateChannelBot(commands.Cog):
     @app_commands.command(name="pvch_admin_kick", description="[権限者専用] プライベートチャンネルからユーザーを追放")
     @app_commands.checks.cooldown(3, 10.0, key=lambda i: (i.guild_id, i.user.id))
     @app_commands.default_permissions(administrator=True)
-    @app_commands.guilds(GUILD_ID)
     async def pvch_admin_kick(self, ctx: discord.Interaction, private_channel: discord.TextChannel, pv_user: discord.User):
         """[Admin only] Kick private channel"""
         if private_channel.category_id != CATEGORY_ID:
