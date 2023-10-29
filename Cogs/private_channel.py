@@ -201,15 +201,9 @@ class PrivateChannelBot(commands.Cog):
 
         # Create private channel
         ch_name: str = f"pvch-{ctx.user.global_name}"
-        # ch_permission: dict = {
-        #     self.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        #     self.guild.get_role(MODERATOR_ROLE_ID): discord.PermissionOverwrite(read_messages=True),
-        #     self.guild.me: discord.PermissionOverwrite(read_messages=True),
-        #     ctx.user: discord.PermissionOverwrite(read_messages=True, )
-        # }
         try:
             channel: TextChannel = await self.category.create_text_channel(name=ch_name)
-            await channel.set_permissions(ctx.user, read_messages=True)
+            await channel.set_permissions(ctx.user, overwrite=discord.PermissionOverwrite(read_messages=True))
         except discord.HTTPException:
             logger.error("Failed to create private channel.")
             await ctx.response.send_message(embed=error_embed_template("プライベートチャンネルの作成に失敗しました。"), ephemeral=True)
