@@ -63,7 +63,7 @@ class PrivateChannel:
         ignore_users: list[str] = []
 
         for user in users:
-            if user.bot or user.id == self.user_id or user.roles[0].id == MODERATOR_ROLE_ID:
+            if user.roles[-1].id in [MODERATOR_ROLE_ID, OWNER_ROLE_ID] or user.id == self.user_id or user.bot:
                 ignore_users.append(user.name)
                 continue
 
@@ -75,11 +75,11 @@ class PrivateChannel:
 
         embed: Embed = invite_embed_template()
         if len(success_users) > 0:
-            embed.add_field(name="成功", value="- "+"\n- ".join(success_users), inline=False)
+            embed.add_field(name="成功", value="- "+"\n- ".join(filter(None, success_users)), inline=False)
         if len(failed_users) > 0:
-            embed.add_field(name="失敗", value="- "+"\n- ".join(failed_users), inline=False)
+            embed.add_field(name="失敗", value="- "+"\n- ".join(filter(None, failed_users)), inline=False)
         if len(ignore_users) > 0:
-            embed.add_field(name="無効", value="- "+"\n- ".join(ignore_users), inline=False)
+            embed.add_field(name="無効", value="- "+"\n- ".join(filter(None, ignore_users)), inline=False)
         await self.channel.send(embed=embed)
 
     async def kick_user(self, users: list[discord.Member]) -> Embed:
@@ -89,7 +89,7 @@ class PrivateChannel:
         ignore_users: list[str] = []
 
         for user in users:
-            if user.bot or user.id == self.user_id or user.roles[0].id == MODERATOR_ROLE_ID:
+            if user.roles[-1].id in [MODERATOR_ROLE_ID, OWNER_ROLE_ID] or user.id == self.user_id or user.bot:
                 ignore_users.append(user.name)
                 continue
 
@@ -101,11 +101,11 @@ class PrivateChannel:
 
         embed: Embed = kick_embed_template()
         if len(success_users) > 0:
-            embed.add_field(name="成功", value="- "+"\n- ".join(success_users), inline=False)
+            embed.add_field(name="成功", value="- "+"\n- ".join(filter(None, success_users)), inline=False)
         if len(failed_users) > 0:
-            embed.add_field(name="失敗", value="- "+"\n- ".join(failed_users), inline=False)
+            embed.add_field(name="失敗", value="- "+"\n- ".join(filter(None, failed_users)), inline=False)
         if len(ignore_users) > 0:
-            embed.add_field(name="無効", value="- "+"\n- ".join(ignore_users), inline=False)
+            embed.add_field(name="無効", value="- "+"\n- ".join(filter(None, ignore_users)), inline=False)
         await self.channel.send(embed=embed)
 
     async def extension_exp(self, ctx: discord.Interaction) -> bool:
