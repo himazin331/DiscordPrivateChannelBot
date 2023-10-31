@@ -63,7 +63,7 @@ class PrivateChannel:
         ignore_users: list[str] = []
 
         for user in users:
-            if user.roles[-1].id in [MODERATOR_ROLE_ID, OWNER_ROLE_ID] or user.id == self.user_id or user.bot:
+            if user.top_role.id in [MODERATOR_ROLE_ID, OWNER_ROLE_ID] or user.id == self.user_id or user.bot:
                 ignore_users.append(user.name)
                 continue
 
@@ -89,7 +89,7 @@ class PrivateChannel:
         ignore_users: list[str] = []
 
         for user in users:
-            if user.roles[-1].id in [MODERATOR_ROLE_ID, OWNER_ROLE_ID] or user.id == self.user_id or user.bot:
+            if user.top_role.id in [MODERATOR_ROLE_ID, OWNER_ROLE_ID] or user.id == self.user_id or user.bot:
                 ignore_users.append(user.name)
                 continue
 
@@ -179,6 +179,41 @@ class PrivateChannelBot(commands.Cog):
         embed: Embed = Embed(title="コマンドヘルプ", color=0x979c9f)
         for cmd in self.bot.tree.walk_commands():
             embed.add_field(name=f"`/{cmd.name}`", value=cmd.description, inline=False)
+        await ctx.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="pvch_info", description="プライベートチャンネル情報を表示する")
+    @app_commands.checks.cooldown(3, 20.0, key=lambda i: (i.guild_id, i.user.id))
+    async def pvch_info(self, ctx: discord.Interaction):
+        """Private channel information display"""
+        if ctx.channel.category_id != CATEGORY_ID:
+            await ctx.response.send_message(embed=error_embed_template("このコマンドはプライベートチャンネルでのみ使用できます。"), ephemeral=True)
+            return
+
+        pvch: PrivateChannel = None
+        for p in used_pvch_userid.values():
+            if p.channel.id == ctx.channel.id:
+                pvch = p
+                break
+
+        embed: Embed = Embed(title="プライベートチャンネル情報", color=0x979c9f)
+        embed.add_field(name="チャンネル名", value=pvch.channel.name, inline=False)
+        embed.add_field(name="チャンネル有効期限", value=pvch.exp.strftime('%Y/%m/%d　%H:%M:%S'), inline=False)
+
+        online_value: str = ""
+        offline_value: str = ""
+        idle_value: str = ""
+        dnd_value: str = ""
+        for member in pvch.channel.members:
+            if member.top_role.id == GENERAL_ROLE_ID:
+                if member.status is discord.Status.offline:
+                    offline_value += f"- {member.display_name}\n"
+                else:
+                    online_value += f"- {member.display_name}\n"
+
+        if online_value != "":
+            embed.add_field(name="オンライン", value=online_value, inline=False)
+        if offline_value != "":
+            embed.add_field(name="オフライン", value=offline_value, inline=False)
         await ctx.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="pvch_create", description="自分のプライベートチャンネルを作成する")

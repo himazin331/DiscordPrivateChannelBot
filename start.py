@@ -7,6 +7,8 @@ from settings import TOKEN
 def main():
   intents: discord.Intents = discord.Intents.none()
   intents.guilds = True
+  intents.members = True
+  intents.presences = True
   intents.messages = True
   intents.message_content = True
 
