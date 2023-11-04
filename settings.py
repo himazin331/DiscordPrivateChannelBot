@@ -12,4 +12,6 @@ SB_ROLE_ID: int = 0000000000000000000
 INACTIVE_DAYS: int = 7
 INACTIVE_SB_DAYS: int = 30
 
+DOCS_URL: str = "https://"
+
 PVCH_DATA_FILE_PATH: str = "data/pvch_data.csv"

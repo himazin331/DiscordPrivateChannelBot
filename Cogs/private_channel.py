@@ -20,7 +20,6 @@ class PrivateChannel:
         self.user_id: int = user_id
         self.txt_channel: TextChannel = txt_channel
         self.vc_channel: VoiceChannel = vc_channel
-        self.delete_notice: bool = False
 
     def __str__(self) -> str:
         return f"PrivateChannel(user_id={self.user_id}, text_channel={self.txt_channel}, voice_channel={self.vc_channel})"
@@ -119,22 +118,15 @@ class PrivateChannel:
     async def is_expired(self, inactive: int) -> bool:
         """Check if private channel is expired"""
         last_active_datetime: datetime = self.txt_channel.created_at.astimezone(timezone(timedelta(hours=9)))
-        last_msg: discord.Message = [message async for message in self.txt_channel.history(limit=1)][0]
-        if last_msg:
-            last_active_datetime = last_msg.created_at
+        last_msg: discord.Message = [message async for message in self.txt_channel.history(limit=1)]
+        if len(last_msg) > 0:
+            last_active_datetime = last_msg[0].created_at
         last_active_datetime = last_active_datetime.astimezone(timezone(timedelta(hours=9)))
         now: datetime = datetime.now().astimezone(timezone(timedelta(hours=9)))
 
         exp: datetime = last_active_datetime + timedelta(days=inactive)
         if exp <= now:
             return True
-
-        if exp <= now + timedelta(minutes=15):
-            if not self.delete_notice:
-                await self.txt_channel.send(embed=info_embed_template(f"あと15分で、このプライベートチャンネルは削除されます。"))
-                self.delete_notice = True
-        else:
-            self.delete_notice = False
         return False
 
 
@@ -377,12 +369,12 @@ class PrivateChannelBot(commands.Cog):
         except discord.HTTPException:
             await ctx.followup.send(embed=kick_embed_template("失敗"), ephemeral=True)
 
-    # @tasks.loop(hours=24)
+    @tasks.loop(hours=24)
     async def check_pv_exp(self):
         """Check private channel expiration date"""
-        delete_pvchs: list[PrivateChannel] = []
+        delete_pvchs: list[int] = []
+
         inactive: int = INACTIVE_DAYS
-        
         for user_id, pvch in pvch_data.items():
             for sb in self.guild.premium_subscribers:
                 if user_id == sb.id:
@@ -391,8 +383,6 @@ class PrivateChannelBot(commands.Cog):
 
             if await pvch.is_expired(inactive):
                 delete_pvchs.append(user_id)
-            else:
-                break
 
         # Automatic deletion
         if len(delete_pvchs) > 0:
