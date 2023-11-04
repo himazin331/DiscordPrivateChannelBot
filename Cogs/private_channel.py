@@ -16,11 +16,10 @@ from settings import *
 pvch_data_csv: PvchDataCsv = PvchDataCsv()
 
 class PrivateChannel:
-    def __init__(self, user_id: int, txt_channel: TextChannel, vc_channel: VoiceChannel, is_sb: bool = False):
+    def __init__(self, user_id: int, txt_channel: TextChannel, vc_channel: VoiceChannel):
         self.user_id: int = user_id
         self.txt_channel: TextChannel = txt_channel
         self.vc_channel: VoiceChannel = vc_channel
-        self.is_sb: bool = is_sb
         self.delete_notice: bool = False
 
     def __str__(self) -> str:
@@ -117,7 +116,7 @@ class PrivateChannel:
             embed.add_field(name="無効", value="- "+"\n- ".join(filter(None, ignore_users)), inline=False)
         await self.txt_channel.send(embed=embed)
 
-    async def is_expired(self) -> bool:
+    async def is_expired(self, inactive: int) -> bool:
         """Check if private channel is expired"""
         last_active_datetime: datetime = self.txt_channel.created_at.astimezone(timezone(timedelta(hours=9)))
         last_msg: discord.Message = [message async for message in self.txt_channel.history(limit=1)][0]
@@ -126,17 +125,18 @@ class PrivateChannel:
         last_active_datetime = last_active_datetime.astimezone(timezone(timedelta(hours=9)))
         now: datetime = datetime.now().astimezone(timezone(timedelta(hours=9)))
 
-        ttl: datetime = last_active_datetime + timedelta(days=INACTIVE_DAYS) if not self.is_sb else last_active_datetime + timedelta(days=INACTIVE_SB_DAYS)
-        if ttl <= now:
+        exp: datetime = last_active_datetime + timedelta(days=inactive)
+        if exp <= now:
             return True
 
-        if ttl <= now + timedelta(minutes=15):
+        if exp <= now + timedelta(minutes=15):
             if not self.delete_notice:
                 await self.txt_channel.send(embed=info_embed_template(f"あと15分で、このプライベートチャンネルは削除されます。"))
                 self.delete_notice = True
-            else:
-                self.delete_notice = False
+        else:
+            self.delete_notice = False
         return False
+
 
 pvch_data: dict[int, PrivateChannel] = {}  # {user_id: PrivateChannel}
 
@@ -240,7 +240,7 @@ class PrivateChannelBot(commands.Cog):
             await ctx.followup.send(embed=error_embed_template("プライベートチャンネルの作成に失敗しました。"), ephemeral=True)
             return
 
-        pvch: PrivateChannel = PrivateChannel(user_id, txt_channel, vc_channel, ctx.user.premium_since is not None)
+        pvch: PrivateChannel = PrivateChannel(user_id, txt_channel, vc_channel)
         pvch_data[user_id] = pvch
         pvch_data_csv.write(pvch)
         await pvch.send_welcome_message()
@@ -377,12 +377,19 @@ class PrivateChannelBot(commands.Cog):
         except discord.HTTPException:
             await ctx.followup.send(embed=kick_embed_template("失敗"), ephemeral=True)
 
-    @tasks.loop(hours=24)
+    # @tasks.loop(hours=24)
     async def check_pv_exp(self):
         """Check private channel expiration date"""
         delete_pvchs: list[PrivateChannel] = []
+        inactive: int = INACTIVE_DAYS
+        
         for user_id, pvch in pvch_data.items():
-            if await pvch.is_expired():
+            for sb in self.guild.premium_subscribers:
+                if user_id == sb.id:
+                    inactive = INACTIVE_SB_DAYS
+                    break
+
+            if await pvch.is_expired(inactive):
                 delete_pvchs.append(user_id)
             else:
                 break
