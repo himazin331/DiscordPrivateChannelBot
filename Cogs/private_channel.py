@@ -181,14 +181,16 @@ class PrivateChannelBot(commands.Cog):
             if p.txt_channel.id == ctx.channel.id:
                 pvch = p
                 break
+        user: discord.Member = self.guild.get_member(pvch.user_id)
 
         embed: Embed = Embed(title="プライベートチャンネル情報", color=0x979c9f)
         embed.add_field(name="チャンネル名", value=pvch.txt_channel.name, inline=False)
+        embed.add_field(name="チャンネル作成者", value=user.display_name, inline=False)
 
         online_value: str = ""
         offline_value: str = ""
         for member in pvch.txt_channel.members:
-            if member.top_role.id in [GENERAL_ROLE_ID, SB_ROLE_ID]:
+            if not member.bot and member.top_role.id not in [OWNER_ROLE_ID, MODERATOR_ROLE_ID]:
                 if member.status is discord.Status.offline:
                     offline_value += f"- {member.display_name}\n"
                 else:
